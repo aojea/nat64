@@ -27,8 +27,13 @@
 
 #define ETH_P_IP   0x0800 /* Internet Protocol packet	*/
 #define ETH_P_IPV6 0x86DD
+#define ETH_HLEN	14		/* Total octets in header.	 */
+
 // From kernel:include/net/ip.h
 #define IP_DF 0x4000  // Flag: "Don't Fragment"
+
+#define TCP_CSUM_OFF (ETH_HLEN + sizeof(struct iphdr) + offsetof(struct tcphdr, check))
+#define UDP_CSUM_OFF (ETH_HLEN + sizeof(struct iphdr) + offsetof(struct udphdr, check))
 
 // rfc6052
 # define NAT64_PREFIX_0 0x64
@@ -45,130 +50,134 @@
 SEC("tc/nat64")
 int nat64(struct __sk_buff* skb)
 {
-		const int l2_header_size =  sizeof(struct ethhdr);
-		void *data = (void *)(long)skb->data;
-		const void *data_end = (void *)(long)skb->data_end;
-		const struct ethhdr *const eth = data;  // used iff is_ethernet
-		const struct ipv6hdr *const ip6 =  (void *)(eth + 1);
+	const int l2_header_size =  sizeof(struct ethhdr);
+	void *data = (void *)(long)skb->data;
+	const void *data_end = (void *)(long)skb->data_end;
+	const struct ethhdr *const eth = data;  // used iff is_ethernet
+	const struct ipv6hdr *const ip6 =  (void *)(eth + 1);
 
-    bpf_printk("NAT64: starting");
-    // Require ethernet dst mac address to be our unicast address.
-    if (skb->pkt_type != PACKET_HOST)
-			return TC_ACT_OK;
+	bpf_printk("NAT64: starting");
+	// Require ethernet dst mac address to be our unicast address.
+	if (skb->pkt_type != PACKET_HOST)
+		return TC_ACT_OK;
 
-    // Must be meta-ethernet IPv6 frame
-    if (skb->protocol != bpf_htons(ETH_P_IPV6))
-			return TC_ACT_OK;
+	// Must be meta-ethernet IPv6 frame
+	if (skb->protocol != bpf_htons(ETH_P_IPV6))
+		return TC_ACT_OK;
 
-    // Must have (ethernet and) ipv6 header
-    if (data + l2_header_size + sizeof(*ip6) > data_end)
-			return TC_ACT_OK;
+	// Must have (ethernet and) ipv6 header
+	if (data + l2_header_size + sizeof(*ip6) > data_end)
+		return TC_ACT_OK;
 
-    // Ethertype - if present - must be IPv6
-    if (eth->h_proto != bpf_htons(ETH_P_IPV6))
-			return TC_ACT_OK;
+	// Ethertype - if present - must be IPv6
+	if (eth->h_proto != bpf_htons(ETH_P_IPV6))
+		return TC_ACT_OK;
 
-    // IP version must be 6
-    if (ip6->version != 6)
-			return TC_ACT_OK;
+	// IP version must be 6
+	if (ip6->version != 6)
+		return TC_ACT_OK;
 
-    // Maximum IPv6 payload length that can be translated to IPv4
-    if (bpf_ntohs(ip6->payload_len) > 0xFFFF - sizeof(struct iphdr))
-			return TC_ACT_OK;
+	// Maximum IPv6 payload length that can be translated to IPv4
+	if (bpf_ntohs(ip6->payload_len) > 0xFFFF - sizeof(struct iphdr))
+		return TC_ACT_OK;
 
-    bpf_printk("NAT64 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6->saddr, &ip6->daddr);
+	bpf_printk("NAT64 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6->saddr, &ip6->daddr);
 
-    switch (ip6->nexthdr) {
-        case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
-        case IPPROTO_UDP:  // address means there is no need to update their checksums.
-        case IPPROTO_ICMPV6: // TODO
-        case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
-        case IPPROTO_ESP:  // since there is never a checksum to update.
-            break;
+	switch (ip6->nexthdr) {
+			case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
+			case IPPROTO_UDP:  // address means there is no need to update their checksums.
+			case IPPROTO_ICMPV6: // TODO
+			case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
+			case IPPROTO_ESP:  // since there is never a checksum to update.
+					break;
 
-        default:  // do not know how to handle anything else
-            return TC_ACT_OK;
-    }
+			default:  // do not know how to handle anything else
+					return TC_ACT_OK;
+	}
 
-    struct ethhdr eth2;
+	struct ethhdr eth2;
 
-    eth2 = *eth;         // Copy over the ethernet header (src/dst mac)
-    eth2.h_proto = bpf_htons(ETH_P_IP);  // But replace the ethertype
+	eth2 = *eth;         // Copy over the ethernet header (src/dst mac)
+	eth2.h_proto = bpf_htons(ETH_P_IP);  // But replace the ethertype
 
-		// build source ip, last byte of the ipv6 addres plus the prefix
-  	// 169.254.64.xxx
-	  __u32 src_addr = 0xA9FE4000 + (bpf_ntohl(ip6->saddr.in6_u.u6_addr32[3]) & 0x000000FF);
+	// build source ip, last byte of the ipv6 addres plus the prefix
+	// 169.254.64.xxx
+	__u32 src_addr = 0xA9FE4000 + (bpf_ntohl(ip6->saddr.in6_u.u6_addr32[3]) & 0x000000FF);
 
-    struct iphdr ip = {
-            .version = 4,                                                      // u4
-            .ihl = sizeof(struct iphdr) / sizeof(__u32),                       // u4
-            .tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),             // u8
-            .id = 0,                                                           // u16
-            .check = 0,                                                        // u16
-            .frag_off = 0,                                                     // u16
-    };
+	struct iphdr ip = {
+					.version = 4,                                                      // u4
+					.ihl = sizeof(struct iphdr) / sizeof(__u32),                       // u4
+					.tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),             // u8
+					.id = 0,                                                           // u16
+					.check = 0,                                                        // u16
+					.frag_off = 0,                                                     // u16
+	};
 
-		// TODO: figure out why when setting this inside the struct the program fail to load
-	  ip.ttl = ip6->hop_limit;
-		ip.protocol = ip6->nexthdr;
-		if (ip.protocol == IPPROTO_ICMPV6)
-			ip.protocol = IPPROTO_ICMP;
-		ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
-		if (bpf_ntohs(ip.tot_len) > 1280) // https://mailarchive.ietf.org/arch/msg/behave/JfxCt1fGT66pEtfXKuEDJ8rdd7w/
-			ip.frag_off = bpf_htons(IP_DF);
-	  ip.saddr = bpf_htonl(src_addr);
-		ip.daddr = ip6->daddr.in6_u.u6_addr32[3];
+	// TODO: figure out why when setting this inside the struct the program fail to load
+	ip.ttl = ip6->hop_limit;
+	ip.protocol = ip6->nexthdr;
+	if (ip.protocol == IPPROTO_ICMPV6)
+		ip.protocol = IPPROTO_ICMP;
+	ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
+	if (bpf_ntohs(ip.tot_len) > 1280) // https://mailarchive.ietf.org/arch/msg/behave/JfxCt1fGT66pEtfXKuEDJ8rdd7w/
+		ip.frag_off = bpf_htons(IP_DF);
+	ip.saddr = bpf_htonl(src_addr);
+	ip.daddr = ip6->daddr.in6_u.u6_addr32[3];
 
-    // Calculate the IPv4 one's complement checksum of the IPv4 header.
-    __wsum sum4 = 0;
-    for (int i = 0; i < sizeof(ip) / sizeof(__u16); ++i) {
-        sum4 += ((__u16*)&ip)[i];
-    }
-    // Note that sum4 is guaranteed to be non-zero by virtue of ip.version == 4
-    sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse u32 into range 1 .. 0x1FFFE
-    sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse any potential carry into u16
-    ip.check = (__u16)~sum4;                // sum4 cannot be zero, so this is never 0xFFFF
-    // Calculate the *negative* IPv6 16-bit one's complement checksum of the IPv6 header.
-    __wsum sum6 = 0;
-    // We'll end up with a non-zero sum due to ip6->version == 6 (which has '0' bits)
-    for (int i = 0; i < sizeof(*ip6) / sizeof(__u16); ++i) {
-        sum6 += ~((__u16*)ip6)[i];  // note the bitwise negation
-    }
-    // Note that there is no L4 checksum update: we are relying on the checksum neutrality
-    // of the ipv6 address chosen by netd's ClatdController.
+	// Calculate the IPv4 one's complement checksum of the IPv4 header.
+	__wsum sum4 = 0;
+	for (int i = 0; i < sizeof(ip) / sizeof(__u16); ++i) {
+			sum4 += ((__u16*)&ip)[i];
+	}
+	// Note that sum4 is guaranteed to be non-zero by virtue of ip.version == 4
+	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse u32 into range 1 .. 0x1FFFE
+	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse any potential carry into u16
+	ip.check = (__u16)~sum4;                // sum4 cannot be zero, so this is never 0xFFFF
+	// Calculate the *negative* IPv6 16-bit one's complement checksum of the IPv6 header.
+	__wsum sum6 = 0;
+	// We'll end up with a non-zero sum due to ip6->version == 6 (which has '0' bits)
+	for (int i = 0; i < sizeof(*ip6) / sizeof(__u16); ++i) {
+			sum6 += ~((__u16*)ip6)[i];  // note the bitwise negation
+	}
+	// Note that there is no L4 checksum update: we are relying on the checksum neutrality
+	// of the ipv6 address chosen by netd's ClatdController.
 
-    // Packet mutations begin - point of no return, but if this first modification fails
-    // the packet is probably still pristine, so let clatd handle it.
-    if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
-			return TC_ACT_OK;
+	// Packet mutations begin - point of no return, but if this first modification fails
+	// the packet is probably still pristine, so let clatd handle it.
+	if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
+		return TC_ACT_OK;
 
-    // This takes care of updating the skb->csum field for a CHECKSUM_COMPLETE packet.
-    //
-    // In such a case, skb->csum is a 16-bit one's complement sum of the entire payload,
-    // thus we need to subtract out the ipv6 header's sum, and add in the ipv4 header's sum.
-    // However, by construction of ip.check above the checksum of an ipv4 header is zero.
-    // Thus we only need to subtract the ipv6 header's sum, which is the same as adding
-    // in the sum of the bitwise negation of the ipv6 header.
-    //
-    // bpf_csum_update() always succeeds if the skb is CHECKSUM_COMPLETE and returns an error
-    // (-ENOTSUPP) if it isn't.  So we just ignore the return code.
-    //
-    // if (skb->ip_summed == CHECKSUM_COMPLETE)
-    //   return (skb->csum = csum_add(skb->csum, csum));
-    // else
-    //   return -ENOTSUPP;
-    bpf_csum_update(skb, sum6);
+	// This takes care of updating the skb->csum field for a CHECKSUM_COMPLETE packet.
+	//
+	// In such a case, skb->csum is a 16-bit one's complement sum of the entire payload,
+	// thus we need to subtract out the ipv6 header's sum, and add in the ipv4 header's sum.
+	// However, by construction of ip.check above the checksum of an ipv4 header is zero.
+	// Thus we only need to subtract the ipv6 header's sum, which is the same as adding
+	// in the sum of the bitwise negation of the ipv6 header.
+	//
+	// bpf_csum_update() always succeeds if the skb is CHECKSUM_COMPLETE and returns an error
+	// (-ENOTSUPP) if it isn't.  So we just ignore the return code.
+	//
+	// if (skb->ip_summed == CHECKSUM_COMPLETE)
+	//   return (skb->csum = csum_add(skb->csum, csum));
+	// else
+	//   return -ENOTSUPP;
+	bpf_csum_update(skb, sum6);
+	// recalculate protocol checksums
+	if (ip.protocol == IPPROTO_UDP) {
+		__u16 new_csum = 0;
+		bpf_skb_store_bytes(skb, UDP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
+	}
 
-    // bpf_skb_change_proto() invalidates all pointers - reload them.
-    data = (void*)(long)skb->data;
-    data_end = (void*)(long)skb->data_end;
-    // I cannot think of any valid way for this error condition to trigger, however I do
-    // believe the explicit check is required to keep the in kernel ebpf verifier happy.
-    if (data + l2_header_size + sizeof(struct iphdr) > data_end)
+	// bpf_skb_change_proto() invalidates all pointers - reload them.
+	data = (void*)(long)skb->data;
+	data_end = (void*)(long)skb->data_end;
+	// I cannot think of any valid way for this error condition to trigger, however I do
+	// believe the explicit check is required to keep the in kernel ebpf verifier happy.
+	if (data + l2_header_size + sizeof(struct iphdr) > data_end)
 		return TC_ACT_SHOT;
 
 	struct ethhdr* new_eth = data;
-
 	// Copy over the updated ethernet header
 	*new_eth = eth2;
 	// Copy over the new ipv4 header.
@@ -275,9 +284,11 @@ static __always_inline int nat46(struct __sk_buff *skb)
 		.priority = ip4->tos >> 4,                       // __u8:4
 		.flow_lbl = {(ip4->tos & 0xF) << 4, 0, 0},       // __u8[3]
 		.payload_len = bpf_htons(bpf_ntohs(ip4->tot_len) - 20),  // __be16
-		.nexthdr = ip4->protocol,                        // __u8
 		.hop_limit = ip4->ttl,                           // __u8
 	};
+	ip6.nexthdr = ip4->protocol;                        // __u8
+	if (ip4->protocol== IPPROTO_ICMP)
+		ip6.nexthdr = IPPROTO_ICMPV6;
 	ip6.saddr.in6_u.u6_addr32[0] = bpf_htonl(0x0064ff9b);
 	ip6.saddr.in6_u.u6_addr32[1] = 0;
 	ip6.saddr.in6_u.u6_addr32[2] = 0;

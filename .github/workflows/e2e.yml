@@ -130,7 +130,7 @@ jobs:
         echo "Original CoreDNS config:"
         echo "${original_coredns}"
         # Patch it
-        fixed_coredns=$( printf '%s' "${original_coredns}" | sed 's/resolv.conf/[64:ff9b::8.8.8.8]:53/' )
+        fixed_coredns=$( printf '%s' "${original_coredns}" | sed 's/\/etc\/resolv.conf/[64:ff9b::8.8.8.8]:53/' )
         echo "Patched CoreDNS config:"
         echo "${fixed_coredns}"
         printf '%s' "${fixed_coredns}" | kubectl apply -f -

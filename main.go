@@ -160,6 +160,14 @@ func main() {
 	}()
 
 	log.Println("NAT64 initialized")
+	defer func() {
+		// Clean up:
+		// - NAT64 interface
+		// - iptables rules
+		log.Println("NAT64 cleaning up")
+		cleanup(v4net, v6net)
+	}()
+
 	select {
 	case <-signalCh:
 		log.Printf("Exiting: received signal")
@@ -167,11 +175,6 @@ func main() {
 	case <-ctx.Done():
 	}
 
-	// Clean up:
-	// - NAT64 interface
-	// - iptables rules
-	log.Println("NAT64 cleaning up")
-	cleanup(v4net, v6net)
 }
 
 // sync creates the nat64 interface with the corresponding addresses

@@ -189,8 +189,10 @@ func sync(v4net, v6net *net.IPNet) error {
 		return err
 	}
 
+	log.Printf("collectio spec %#v", spec)
+
 	for _, prog := range spec.Programs {
-		log.Printf("eBPF program spec section %s", prog.SectionName)
+		log.Printf("eBPF program spec section %s name %s", prog.SectionName, prog.Name)
 	}
 
 	/* TODO rewrite the eBPF program networks
@@ -208,11 +210,13 @@ func sync(v4net, v6net *net.IPNet) error {
 	if err != nil {
 		return err
 	}
+
+	log.Printf("collectio  %#v", coll)
 	for _, prog := range coll.Programs {
 		log.Printf("eBPF program %s", prog.String())
 	}
 
-	nat64, ok := coll.Programs["sched_cls_egress_nat64_prog"]
+	nat64, ok := coll.Programs["nat64"]
 	if !ok {
 		return fmt.Errorf("could not find sched_cls_egress_nat64_prog program on %s", bpfProgram)
 	}
@@ -233,7 +237,7 @@ func sync(v4net, v6net *net.IPNet) error {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
 
-	nat46, ok := coll.Programs["sched_cls_egress_nat46_prog"]
+	nat46, ok := coll.Programs["nat46"]
 	if !ok {
 		return fmt.Errorf("could not find schedcls/nat46 program on %s", bpfProgram)
 	}

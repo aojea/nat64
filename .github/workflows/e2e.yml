@@ -1,0 +1,205 @@
+name: e2e
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.22.0"
+  K8S_VERSION: "v1.28.1"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: aojea/nat64
+  KIND_CLUSTER_NAME: kind
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      id: go
+
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Build
+      run: |
+        docker build -t aojea/nat64:test -f Dockerfile .
+        mkdir _output
+        docker save aojea/nat64:test  > _output/nat64-image.tar
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: test-image
+        path: _output/nat64-image.tar
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    needs:
+      - build
+    env:
+      JOB_NAME: "nat64-e2e"
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - name: Enable ipv4 and ipv6 forwarding
+      run: |
+        sudo sysctl -w net.ipv6.conf.all.forwarding=1
+        sudo sysctl -w net.ipv4.ip_forward=1
+
+    - name: Set up environment (download dependencies)
+      run: |
+        TMP_DIR=$(mktemp -d)
+        # Test binaries
+        curl -L https://dl.k8s.io/${{ env.K8S_VERSION }}/kubernetes-test-linux-amd64.tar.gz -o ${TMP_DIR}/kubernetes-test-linux-amd64.tar.gz
+        tar xvzf ${TMP_DIR}/kubernetes-test-linux-amd64.tar.gz \
+          --directory ${TMP_DIR} \
+          --strip-components=3 kubernetes/test/bin/ginkgo kubernetes/test/bin/e2e.test
+        # kubectl
+        curl -L https://dl.k8s.io/${{ env.K8S_VERSION }}/bin/linux/amd64/kubectl -o ${TMP_DIR}/kubectl
+        # kind
+        curl -Lo ${TMP_DIR}/kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        # Install
+        sudo cp ${TMP_DIR}/ginkgo /usr/local/bin/ginkgo
+        sudo cp ${TMP_DIR}/e2e.test /usr/local/bin/e2e.test
+        sudo cp ${TMP_DIR}/kubectl /usr/local/bin/kubectl
+        sudo cp ${TMP_DIR}/kind /usr/local/bin/kind
+        sudo chmod +x /usr/local/bin/*
+
+    - name: Create multi node cluster
+      run: |
+        # output_dir
+        mkdir -p _artifacts
+        # create cluster
+        cat <<EOF | /usr/local/bin/kind create cluster \
+          --name ${{ env.KIND_CLUSTER_NAME}}           \
+          --image kindest/node:${{ env.K8S_VERSION }}  \
+          -v7 --wait 1m --retain --config=-
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        networking:
+          ipFamily: ipv6
+        nodes:
+        - role: control-plane
+        - role: worker
+        - role: worker
+        EOF
+        # dump the kubeconfig for later
+        /usr/local/bin/kind get kubeconfig --name ${{ env.KIND_CLUSTER_NAME}} > _artifacts/kubeconfig.conf
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: test-image
+
+    - name: Install nat64
+      run: |
+        # preload nat64 image
+        docker load --input nat64-image.tar
+        /usr/local/bin/kind load docker-image aojea/nat64:test --name ${{ env.KIND_CLUSTER_NAME}}
+        sed -i s#aojea/nat64.*#aojea/nat64:test# install.yaml
+        /usr/local/bin/kubectl apply -f ./install.yaml
+
+    - name: Get Cluster status
+      run: |
+        # wait network is ready
+        sleep 5
+        /usr/local/bin/kubectl get nodes -o wide
+        /usr/local/bin/kubectl get pods -A
+        /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l k8s-app=kube-dns
+
+
+    - name: Use DNS64 upstream DNS server
+      run: |
+        # Use Google Public DNS64 https://developers.google.com/speed/public-dns/docs/dns64 
+        original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
+        echo "Original CoreDNS config:"
+        echo "${original_coredns}"
+        # Patch it
+        fixed_coredns=$( printf '%s' "${original_coredns}" | sed 's/resolv.conf/[64:ff9b::8.8.8.8]:53/' )
+        echo "Patched CoreDNS config:"
+        echo "${fixed_coredns}"
+        printf '%s' "${fixed_coredns}" | kubectl apply -f -
+
+    - name: Run tests
+      run: |
+        export KUBERNETES_CONFORMANCE_TEST='y'
+        export E2E_REPORT_DIR=${PWD}/_artifacts
+
+        # Run tests
+        /usr/local/bin/ginkgo --nodes=25                \
+          --focus="\[DNS\]"     \
+          --skip="Feature|Federation|machinery|PerformanceDNS|DualStack|Disruptive|Serial|Slow|KubeProxy|LoadBalancer|GCE|Netpol|NetworkPolicy|NodeConformance"   \
+          /usr/local/bin/e2e.test                       \
+          --                                            \
+          --kubeconfig=${PWD}/_artifacts/kubeconfig.conf     \
+          --provider=local                              \
+          --dump-logs-on-failure=false                  \
+          --report-dir=${E2E_REPORT_DIR}                \
+          --disable-log-dump=true
+
+    - name: Upload Junit Reports
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: './_artifacts/*.xml'
+
+    - name: Export logs
+      if: always()
+      run: |
+        /usr/local/bin/kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug ./_artifacts/logs
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: ./_artifacts/logs
+
+  publish:
+    name: publish
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+    needs:
+      - e2e
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: test-image
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+

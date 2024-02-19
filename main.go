@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
@@ -126,6 +127,33 @@ func main() {
 		log.Fatalf("Could not sync nat64: %v", err)
 	}
 
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	// Install iptables rule to masquerade IPv4 NAT64 traffic
+	ipt4, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		log.Fatalf("Could not use iptables IPv4: %v", err)
+	}
+
+	ipt6, err := iptables.NewWithProtocol(iptables.ProtocolIPv6)
+	if err != nil {
+		log.Fatalf("Could not use iptables IPv6: %v", err)
+	}
+
+	// sync iptables rules
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		err = syncIptablesRules(ipt4, ipt6)
+		if err != nil {
+			log.Printf("error syncing iptables rules: %v", err)
+		}
+	}()
+
 	select {
 	case <-signalCh:
 		log.Printf("Exiting: received signal")
@@ -147,6 +175,7 @@ func sync(v4net, v6net *net.IPNet) error {
 	// Create the NAT64 interface if it does not exist
 	link, err := netlink.LinkByName(nat64If)
 	if link == nil || err != nil {
+		log.Printf("NAT64 interface with name %s not found, creating it", nat64If)
 		link = &netlink.Dummy{
 			LinkAttrs: netlink.LinkAttrs{
 				Name: nat64If,
@@ -158,17 +187,35 @@ func sync(v4net, v6net *net.IPNet) error {
 		}
 	}
 
-	if err := netlink.LinkSetUp(link); err != nil {
-		return err
+	// set the interface up if necessary
+	if link.Attrs().Flags&net.FlagUp == 0 {
+		log.Printf("NAT64 interface with name %s down, setting it up", nat64If)
+		if err := netlink.LinkSetUp(link); err != nil {
+			return err
+		}
 	}
 
-	// Configure IP addresses on the NAT64 interface
-	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v4net}); err != nil {
+	// Configure IP addresses on the NAT64 interface if necessary
+	addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	if err != nil {
 		return err
 	}
+	if len(addresses) != 1 && addresses[0].IPNet.String() != v4net.String() {
+		log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v4net.String())
+		if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v4net}); err != nil {
+			return err
+		}
+	}
 
-	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v6net}); err != nil {
+	addresses, err = netlink.AddrList(link, netlink.FAMILY_V6)
+	if err != nil {
 		return err
+	}
+	if len(addresses) != 1 && addresses[0].IPNet.String() != v6net.String() {
+		log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v6net.String())
+		if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v6net}); err != nil {
+			return err
+		}
 	}
 
 	// Create qdisc on nat64 interface
@@ -215,11 +262,6 @@ func sync(v4net, v6net *net.IPNet) error {
 		return err
 	}
 
-	log.Printf("collectio  %#v", coll)
-	for _, prog := range coll.Programs {
-		log.Printf("eBPF program %s", prog.String())
-	}
-
 	nat64, ok := coll.Programs["nat64"]
 	if !ok {
 		return fmt.Errorf("could not find tc/nat64 program on %s", bpfProgram)
@@ -238,6 +280,7 @@ func sync(v4net, v6net *net.IPNet) error {
 		DirectAction: true,
 	}
 
+	log.Printf("adding eBPF nat64 prog to the interface %s", nat64If)
 	if err := netlink.FilterAdd(filter); err != nil {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
@@ -260,24 +303,20 @@ func sync(v4net, v6net *net.IPNet) error {
 		DirectAction: true,
 	}
 
+	log.Printf("adding eBPF nat46 prog to the interface %s", nat64If)
 	if err := netlink.FilterAdd(filter); err != nil {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
 
+	return nil
+}
+
+func syncIptablesRules(ipt4, ipt6 *iptables.IPTables) error {
 	// Install iptables rule to not masquerade IPv6 NAT64 traffic
-	ipt6, err := iptables.NewWithProtocol(iptables.ProtocolIPv6)
-	if err != nil {
-		return err
-	}
 	if err := ipt6.InsertUnique("nat", "POSTROUTING", 1, "-d", natV6Range, "-j", "RETURN"); err != nil {
 		return err
 	}
 
-	// Install iptables rule to masquerade IPv4 NAT64 traffic
-	ipt4, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
-	if err != nil {
-		return err
-	}
 	if err := ipt4.InsertUnique("nat", "POSTROUTING", 1, "-s", natV4Range, "-o", gwIface, "-j", "MASQUERADE"); err != nil {
 		return err
 	}

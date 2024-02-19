@@ -37,6 +37,7 @@ var (
 	natV4Range         string
 	natV6Range         string
 	nat64If            string
+	podCIDR            string
 
 	gwIface string
 )
@@ -46,6 +47,7 @@ func init() {
 	flag.StringVar(&natV4Range, "nat-v4-cidr", "169.254.64.0/24", "The IPv4 CIDR used to source NAT the NAT64 addresses")
 	flag.StringVar(&natV6Range, "nat-v6-cidr", "64:ff9b::/96", "The IPv6 CIDR used for IPv4-Embedded IPv6 Address Prefix, default 64:ff9b::/96 (rfc6052)")
 	flag.StringVar(&nat64If, "iface", "nat64", "The name of the interfaces created in the system to implement NAT64")
+	flag.StringVar(&podCIDR, "source-cidr", "", "The subnet used to set the source range to NAT64, by default all traffic using the nat64 prefix is allowed")
 
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: nat64 [options]\n\n")
@@ -197,8 +199,11 @@ func sync(v4net, v6net *net.IPNet) error {
 
 	/* TODO rewrite the eBPF program networks
 	err = spec.RewriteConstants(map[string]interface{}{
-		"V6_PREFIX": uint8(transportProtocolNumber),
-		"V4_PREFIX": uint8(family),
+		"NAT64_PREFIX": uint32(transportProtocolNumber),
+		"NAT46_PREFIX": uint32(family),
+		"POD_PREFIX_0":,
+		"POD_PREFIX_1":,
+		"POD_PREFIX_2":,
 	})
 	if err != nil {
 		return fmt.Errorf("Error rewriting eBPF program: %v", err)

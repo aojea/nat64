@@ -223,13 +223,14 @@ func sync(v4net, v6net *net.IPNet) error {
 
 	nat64, ok := coll.Programs["nat64"]
 	if !ok {
-		return fmt.Errorf("could not find sched_cls_egress_nat64_prog program on %s", bpfProgram)
+		return fmt.Errorf("could not find tc/nat64 program on %s", bpfProgram)
 	}
 
 	filter := &netlink.BpfFilter{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: link.Attrs().Index,
-			Handle:    netlink.HANDLE_MIN_EGRESS,
+			Parent:    netlink.HANDLE_MIN_EGRESS,
+			Handle:    netlink.MakeHandle(0, 1),
 			Protocol:  unix.ETH_P_IPV6,
 			Priority:  1,
 		},
@@ -238,19 +239,20 @@ func sync(v4net, v6net *net.IPNet) error {
 		DirectAction: true,
 	}
 
-	if err := netlink.FilterReplace(filter); err != nil {
+	if err := netlink.FilterAdd(filter); err != nil {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
 
 	nat46, ok := coll.Programs["nat46"]
 	if !ok {
-		return fmt.Errorf("could not find schedcls/nat46 program on %s", bpfProgram)
+		return fmt.Errorf("could not find tc/nat46 program on %s", bpfProgram)
 	}
 
 	filter = &netlink.BpfFilter{
 		FilterAttrs: netlink.FilterAttrs{
 			LinkIndex: link.Attrs().Index,
-			Handle:    netlink.HANDLE_MIN_EGRESS,
+			Parent:    netlink.HANDLE_MIN_EGRESS,
+			Handle:    netlink.MakeHandle(0, 1),
 			Protocol:  unix.ETH_P_IP,
 			Priority:  2,
 		},
@@ -259,7 +261,7 @@ func sync(v4net, v6net *net.IPNet) error {
 		DirectAction: true,
 	}
 
-	if err := netlink.FilterReplace(filter); err != nil {
+	if err := netlink.FilterAdd(filter); err != nil {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
 

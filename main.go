@@ -71,8 +71,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Can not get route to %s: %v", v4ip.String(), err)
 	}
-	if len(routes) > 0 {
-		log.Fatalf("Overalapping routes %v with the range %s", routes, natV4Range)
+	// TODO: do not consider the default route
+	if len(routes) > 1 {
+		log.Printf("Overalapping routes %v with the range %s", routes, natV4Range)
 	}
 
 	v6ip, v6net, err := net.ParseCIDR(natV6Range)
@@ -80,11 +81,13 @@ func main() {
 		log.Fatalf("Wrong nat-v6-cidr %s : %v", natV6Range, err)
 	}
 
+	routes, err = netlink.RouteGet(v6ip)
 	if err != nil {
 		log.Fatalf("Can not get route to %s: %v", v6ip.String(), err)
 	}
-	if len(routes) > 0 {
-		log.Fatalf("Overalapping routes %v with the range %s", routes, natV4Range)
+	// TODO: do not consider the default route
+	if len(routes) > 1 {
+		log.Printf("Overalapping routes %v with the range %s", routes, natV4Range)
 	}
 
 	// Obtain the interface with the default route for IPv4 so we can masquerade the traffic
@@ -116,10 +119,10 @@ func main() {
 		log.Fatal("Removing memlock:", err)
 	}
 
-	// install iptables rules to divert traffic
+	// sync nat64
 	err = sync(v4net, v6net)
 	if err != nil {
-		log.Fatalf("Could not sync necessary iptables rules: %v", err)
+		log.Fatalf("Could not sync nat64: %v", err)
 	}
 
 	select {
@@ -142,11 +145,7 @@ func main() {
 func sync(v4net, v6net *net.IPNet) error {
 	// Create the NAT64 interface if it does not exist
 	link, err := netlink.LinkByName(nat64If)
-	if err != nil {
-		return err
-	}
-
-	if link == nil {
+	if link == nil || err != nil {
 		link = &netlink.Dummy{
 			LinkAttrs: netlink.LinkAttrs{
 				Name: nat64If,
@@ -186,6 +185,10 @@ func sync(v4net, v6net *net.IPNet) error {
 		return err
 	}
 
+	for _, prog := range spec.Programs {
+		log.Printf("eBPF program spec section %s", prog.SectionName)
+	}
+
 	/* TODO rewrite the eBPF program networks
 	err = spec.RewriteConstants(map[string]interface{}{
 		"V6_PREFIX": uint8(transportProtocolNumber),
@@ -201,7 +204,14 @@ func sync(v4net, v6net *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-	nat64 := coll.Programs["schedcls/nat64"]
+	for _, prog := range coll.Programs {
+		log.Printf("eBPF program %s", prog.String())
+	}
+
+	nat64, ok := coll.Programs["sched_cls_egress_nat64_prog"]
+	if !ok {
+		return fmt.Errorf("could not find sched_cls_egress_nat64_prog program on %s", bpfProgram)
+	}
 
 	filter := &netlink.BpfFilter{
 		FilterAttrs: netlink.FilterAttrs{
@@ -219,7 +229,10 @@ func sync(v4net, v6net *net.IPNet) error {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
 	}
 
-	nat46 := coll.Programs["schedcls/nat46"]
+	nat46, ok := coll.Programs["sched_cls_egress_nat46_prog"]
+	if !ok {
+		return fmt.Errorf("could not find schedcls/nat46 program on %s", bpfProgram)
+	}
 
 	filter = &netlink.BpfFilter{
 		FilterAttrs: netlink.FilterAttrs{

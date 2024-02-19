@@ -18,6 +18,8 @@ env:
   IMAGE_NAME: aojea/nat64
   KIND_CLUSTER_NAME: kind
 
+permissions: write-all
+
 jobs:
   build:
     name: build

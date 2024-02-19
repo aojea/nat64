@@ -121,7 +121,7 @@ jobs:
         /usr/local/bin/kubectl get nodes -o wide
         /usr/local/bin/kubectl get pods -A
         /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l k8s-app=kube-dns
-
+        /usr/local/bin/kubectl wait --timeout=1m --for=condition=ready pods --namespace=kube-system -l app=nat64
 
     - name: Use DNS64 upstream DNS server
       run: |

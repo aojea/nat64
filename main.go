@@ -28,8 +28,9 @@ import (
 // xref: https://github.com/cilium/cilium/issues/23604
 
 const (
-	originalMTU = 1500
-	bpfProgram  = "bpf/nat64.o"
+	originalMTU     = 1500
+	bpfProgram      = "bpf/nat64.o"
+	reconcilePeriod = 5 * time.Minute
 )
 
 var (
@@ -97,6 +98,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("can not obtain default IPv4 gatewat interface: %v", err)
 	}
+	log.Printf("detected %s as default gateway interface", gwIface)
 
 	// trap Ctrl+C and call cancel on the context
 	ctx := context.Background()
@@ -113,6 +115,7 @@ func main() {
 	// run metrics server
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
+		log.Printf("starting metrics server listening in %s", metricsBindAddress)
 		http.ListenAndServe(metricsBindAddress, nil)
 	}()
 
@@ -122,12 +125,13 @@ func main() {
 	}
 
 	// sync nat64
+	log.Printf("create NAT64 interface %s with networks %s and %s", nat64If, v4net.String(), v6net.String())
 	err = sync(v4net, v6net)
 	if err != nil {
 		log.Fatalf("Could not sync nat64: %v", err)
 	}
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(reconcilePeriod)
 	defer ticker.Stop()
 
 	// Install iptables rule to masquerade IPv4 NAT64 traffic
@@ -148,12 +152,14 @@ func main() {
 			return
 		case <-ticker.C:
 		}
+		log.Println("syncing iptables rules ...")
 		err = syncIptablesRules(ipt4, ipt6)
 		if err != nil {
 			log.Printf("error syncing iptables rules: %v", err)
 		}
 	}()
 
+	log.Println("NAT64 initialized")
 	select {
 	case <-signalCh:
 		log.Printf("Exiting: received signal")
@@ -236,8 +242,6 @@ func sync(v4net, v6net *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-
-	log.Printf("collectio spec %#v", spec)
 
 	for _, prog := range spec.Programs {
 		log.Printf("eBPF program spec section %s name %s", prog.SectionName, prog.Name)

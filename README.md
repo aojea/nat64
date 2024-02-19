@@ -91,4 +91,5 @@ This is far to be complete, features and suggestions are welcome:
 
 - https://datatracker.ietf.org/doc/html/rfc6052
 - https://datatracker.ietf.org/doc/html/rfc6146
+- https://datatracker.ietf.org/doc/html/rfc6145
 - https://blog.dan.drown.org/clatd-on-android/

@@ -36,7 +36,6 @@
 # define NAT64_PREFIX_2 0x9b
 # define NAT64_PREFIX_3 0
 
-
 /* Declare BPF maps */
 
 // Create an IPv4 packets using as destination address the last 4 bytes the
@@ -82,6 +81,7 @@ int nat64(struct __sk_buff* skb)
     switch (ip6->nexthdr) {
         case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
         case IPPROTO_UDP:  // address means there is no need to update their checksums.
+        case IPPROTO_ICMP: // TODO
         case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
         case IPPROTO_ESP:  // since there is never a checksum to update.
             break;
@@ -236,6 +236,7 @@ static __always_inline int nat46(struct __sk_buff *skb)
 
 	switch (ip4->protocol) {
 	case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
+	case IPPROTO_ICMP: // TODO
 	case IPPROTO_GRE:  // address means there is no need to update their checksums.
 	case IPPROTO_ESP:  // We do not need to bother looking at GRE/ESP headers,
 		break;         // since there is never a checksum to update.

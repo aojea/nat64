@@ -307,7 +307,7 @@ static __always_inline int nat46(struct __sk_buff *skb)
 	return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 }
 
-SEC("schedcls/nat46")
+SEC("nat46")
 int sched_cls_egress_nat46_prog(struct __sk_buff *skb)
 {
 	bpf_printk("sched_cls_egress_nat46_prog");
@@ -318,7 +318,7 @@ int sched_cls_egress_nat46_prog(struct __sk_buff *skb)
 	return TC_ACT_OK;
 }
 
-SEC("schedcls/nat64")
+SEC("nat64")
 int sched_cls_egress6_nat64_prog(struct __sk_buff *skb)
 {
   bpf_printk("sched_cls_egress_nat64_prog");

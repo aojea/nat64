@@ -2,8 +2,8 @@ ARG GOARCH="amd64"
 
 FROM ubuntu:22.04 AS ebpf-builder
 WORKDIR /go/src/app
-COPY . .
 RUN apt-get update && apt-get -y install clang llvm
+COPY . .
 RUN clang -target bpf -g -Wall -O2 -c bpf/nat64.c -o bpf/nat64.o
 
 FROM golang:1.22 AS builder

@@ -104,14 +104,16 @@ int nat64(struct __sk_buff* skb)
             .ihl = sizeof(struct iphdr) / sizeof(__u32),                       // u4
             .tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),             // u8
             .id = 0,                                                           // u16
-            .frag_off = bpf_htons(IP_DF),                                      // u16
             .check = 0,                                                        // u16
+            .frag_off = 0,                                                     // u16
     };
 
 		// TODO: figure out why when setting this inside the struct the program fail to load
 	  ip.ttl = ip6->hop_limit;
 		ip.protocol = ip6->nexthdr;
 		ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
+		if (bpf_ntohs(ip.tot_len) > 1280) // https://mailarchive.ietf.org/arch/msg/behave/JfxCt1fGT66pEtfXKuEDJ8rdd7w/
+			ip.frag_off = bpf_htons(IP_DF);
 	  ip.saddr = bpf_htonl(src_addr);
 		ip.daddr = ip6->daddr.in6_u.u6_addr32[3];
 

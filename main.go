@@ -289,7 +289,11 @@ func sync(v4net, v6net *net.IPNet) error {
 
 	log.Printf("adding eBPF nat64 prog to the interface %s", nat64If)
 	if err := netlink.FilterAdd(filter); err != nil {
-		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
+		log.Printf("filter %s already exist on interface %s, replacing it ...", filter.Name, nat64If)
+		// it may already exist, try to replace it
+		if err := netlink.FilterReplace(filter); err != nil {
+			return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
+		}
 	}
 
 	nat46, ok := coll.Programs["nat46"]
@@ -312,7 +316,10 @@ func sync(v4net, v6net *net.IPNet) error {
 
 	log.Printf("adding eBPF nat46 prog to the interface %s", nat64If)
 	if err := netlink.FilterAdd(filter); err != nil {
-		return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
+		log.Printf("filter %s already exist on interface %s, replacing it ...", filter.Name, nat64If)
+		if err := netlink.FilterReplace(filter); err != nil {
+			return fmt.Errorf("replacing tc filter for interface %s: %w", link.Attrs().Name, err)
+		}
 	}
 
 	return nil

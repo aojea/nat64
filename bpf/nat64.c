@@ -43,45 +43,55 @@
 // dst IPv6 address with the NAT64 prefix.
 // Use as source address the last digit of the soucre address with the 169.254.64.x prefix
 // Assume there are less than 254 pods always in the node and that range is empty
-static __always_inline int nat64(struct __sk_buff* skb) {
-    const int l2_header_size = sizeof(struct ethhdr);
-    void* data = (void*)(long)skb->data;
-    const void* data_end = (void*)(long)skb->data_end;
-	const struct ethhdr * const eth = data;  // used iff is_ethernet
-	const struct ipv6hdr * const ip6 =  (void *)(eth + 1);
+SEC("tc/nat64")
+int nat64(struct __sk_buff* skb)
+{
+		const int l2_header_size =  sizeof(struct ethhdr);
+		void *data = (void *)(long)skb->data;
+		const void *data_end = (void *)(long)skb->data_end;
+		const struct ethhdr *const eth = data;  // used iff is_ethernet
+		const struct ipv6hdr *const ip6 =  (void *)(eth + 1);
 
     bpf_printk("NAT64: starting");
     // Require ethernet dst mac address to be our unicast address.
     if (skb->pkt_type != PACKET_HOST)
 			return TC_ACT_OK;
+
     // Must be meta-ethernet IPv6 frame
     if (skb->protocol != bpf_htons(ETH_P_IPV6))
 			return TC_ACT_OK;
+
     // Must have (ethernet and) ipv6 header
     if (data + l2_header_size + sizeof(*ip6) > data_end)
 			return TC_ACT_OK;
+
     // Ethertype - if present - must be IPv6
     if (eth->h_proto != bpf_htons(ETH_P_IPV6))
 			return TC_ACT_OK;
+
     // IP version must be 6
     if (ip6->version != 6)
 			return TC_ACT_OK;
+
     // Maximum IPv6 payload length that can be translated to IPv4
     if (bpf_ntohs(ip6->payload_len) > 0xFFFF - sizeof(struct iphdr))
 			return TC_ACT_OK;
+
+    bpf_printk("NAT64 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6->saddr, &ip6->daddr);
+
     switch (ip6->nexthdr) {
         case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
         case IPPROTO_UDP:  // address means there is no need to update their checksums.
         case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
         case IPPROTO_ESP:  // since there is never a checksum to update.
             break;
+
         default:  // do not know how to handle anything else
             return TC_ACT_OK;
     }
 
-    bpf_printk("NAT64 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6->saddr, &ip6->daddr);
-
     struct ethhdr eth2;
+
     eth2 = *eth;         // Copy over the ethernet header (src/dst mac)
     eth2.h_proto = bpf_htons(ETH_P_IP);  // But replace the ethertype
 
@@ -93,15 +103,17 @@ static __always_inline int nat64(struct __sk_buff* skb) {
             .version = 4,                                                      // u4
             .ihl = sizeof(struct iphdr) / sizeof(__u32),                       // u4
             .tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),             // u8
-            .tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr)),  // u16
             .id = 0,                                                           // u16
             .frag_off = bpf_htons(IP_DF),                                      // u16
-            .ttl = ip6->hop_limit,                                             // u8
-            .protocol = ip6->nexthdr,                                          // u8
             .check = 0,                                                        // u16
-            .saddr = bpf_htonl(src_addr),                            		       // u32
-            .daddr = ip6->daddr.in6_u.u6_addr32[3],                            // u32
     };
+
+		// TODO: figure out why when setting this inside the struct the program fail to load
+	  ip.ttl = ip6->hop_limit;
+		ip.protocol = ip6->nexthdr;
+		ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
+	  ip.saddr = bpf_htonl(src_addr);
+		ip.daddr = ip6->daddr.in6_u.u6_addr32[3];
 
     // Calculate the IPv4 one's complement checksum of the IPv4 header.
     __wsum sum4 = 0;
@@ -123,7 +135,9 @@ static __always_inline int nat64(struct __sk_buff* skb) {
 
     // Packet mutations begin - point of no return, but if this first modification fails
     // the packet is probably still pristine, so let clatd handle it.
-    if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0)) return TC_ACT_OK;
+    if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
+			return TC_ACT_OK;
+
     // This takes care of updating the skb->csum field for a CHECKSUM_COMPLETE packet.
     //
     // In such a case, skb->csum is a 16-bit one's complement sum of the entire payload,
@@ -150,6 +164,7 @@ static __always_inline int nat64(struct __sk_buff* skb) {
 		return TC_ACT_SHOT;
 
 	struct ethhdr* new_eth = data;
+
 	// Copy over the updated ethernet header
 	*new_eth = eth2;
 	// Copy over the new ipv4 header.
@@ -163,6 +178,7 @@ static __always_inline int nat64(struct __sk_buff* skb) {
 // Build an IPv6 packet from an IPv4 packet
 // destination address is pod prefix plus last digit from 169.254.64.x
 // source address is the IPv4 src address embedded on the well known NAT64 prefix
+SEC("tc/nat46")
 static __always_inline int nat46(struct __sk_buff *skb)
 {
 	const int l2_header_size =  sizeof(struct ethhdr);
@@ -239,6 +255,7 @@ static __always_inline int nat46(struct __sk_buff *skb)
 	default:  // do not know how to handle anything else
 		return TC_ACT_OK;
 	}
+
 	struct ethhdr eth2;  // used iff is_ethernet
 
 	eth2 = *eth;                     // Copy over the ethernet header (src/dst mac)
@@ -247,7 +264,6 @@ static __always_inline int nat46(struct __sk_buff *skb)
   // build dest ip, last byte of the ipv6 addres plus the pod prefix
   // pod_prefix::xxx
 	 __u32 dst_addr =  bpf_ntohl(ip4->daddr) & 0x000000FF;
-
 
 	struct ipv6hdr ip6 = {
 		.version = 6,                                    // __u8:4
@@ -306,28 +322,5 @@ static __always_inline int nat46(struct __sk_buff *skb)
 	bpf_printk("NAT46 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6.saddr, &ip6.daddr);
 	return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 }
-
-SEC("nat46")
-int sched_cls_egress_nat46_prog(struct __sk_buff *skb)
-{
-	bpf_printk("sched_cls_egress_nat46_prog");
-	if (skb->protocol == bpf_htons(ETH_P_IP))
-		return nat46(skb);
-    
-	bpf_printk("not ipv proto: %x", skb->protocol); 
-	return TC_ACT_OK;
-}
-
-SEC("nat64")
-int sched_cls_egress6_nat64_prog(struct __sk_buff *skb)
-{
-  bpf_printk("sched_cls_egress_nat64_prog");
-  if (skb->protocol == bpf_htons(ETH_P_IPV6))
-	return nat64(skb);
-
-  bpf_printk("not ipv6 proto: %x", skb->protocol);
-  return TC_ACT_OK;
-}
-
 
 char __license[] SEC("license") = "GPL";

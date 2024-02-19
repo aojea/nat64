@@ -146,17 +146,18 @@ int nat64(struct __sk_buff* skb)
 
 	bpf_csum_update(skb, sum6);
 
-	/*
+
 	// recalculate protocol checksums
+	// UDP checksum is optional for IPv4
 	if (ip.protocol == IPPROTO_UDP) {
 		__u16 new_csum = 0;
 		bpf_skb_store_bytes(skb, UDP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
 	}
+	// TODO: recalculate TCP checksum since we can not depend on checksum neutrality
 	if (ip.protocol == IPPROTO_TCP) {
 		__u16 new_csum = 0;
 		bpf_skb_store_bytes(skb, TCP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
 	}
-*/
 
 	// bpf_skb_change_proto() invalidates all pointers - reload them.
 	data = (void*)(long)skb->data;

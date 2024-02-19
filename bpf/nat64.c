@@ -113,7 +113,6 @@ int nat64(struct __sk_buff* skb)
 					.frag_off = 0,                                                     // u16
 	};
 
-	// TODO: figure out why when setting this inside the struct the program fail to load
 	ip.ttl = ip6->hop_limit;
 	ip.protocol = ip6->nexthdr;
 	if (ip.protocol == IPPROTO_ICMPV6)
@@ -139,35 +138,25 @@ int nat64(struct __sk_buff* skb)
 	for (int i = 0; i < sizeof(*ip6) / sizeof(__u16); ++i) {
 			sum6 += ~((__u16*)ip6)[i];  // note the bitwise negation
 	}
-	// Note that there is no L4 checksum update: we are relying on the checksum neutrality
-	// of the ipv6 address chosen by netd's ClatdController.
 
 	// Packet mutations begin - point of no return, but if this first modification fails
 	// the packet is probably still pristine, so let clatd handle it.
 	if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
 		return TC_ACT_OK;
 
-	// This takes care of updating the skb->csum field for a CHECKSUM_COMPLETE packet.
-	//
-	// In such a case, skb->csum is a 16-bit one's complement sum of the entire payload,
-	// thus we need to subtract out the ipv6 header's sum, and add in the ipv4 header's sum.
-	// However, by construction of ip.check above the checksum of an ipv4 header is zero.
-	// Thus we only need to subtract the ipv6 header's sum, which is the same as adding
-	// in the sum of the bitwise negation of the ipv6 header.
-	//
-	// bpf_csum_update() always succeeds if the skb is CHECKSUM_COMPLETE and returns an error
-	// (-ENOTSUPP) if it isn't.  So we just ignore the return code.
-	//
-	// if (skb->ip_summed == CHECKSUM_COMPLETE)
-	//   return (skb->csum = csum_add(skb->csum, csum));
-	// else
-	//   return -ENOTSUPP;
 	bpf_csum_update(skb, sum6);
+
+	/*
 	// recalculate protocol checksums
 	if (ip.protocol == IPPROTO_UDP) {
 		__u16 new_csum = 0;
 		bpf_skb_store_bytes(skb, UDP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
 	}
+	if (ip.protocol == IPPROTO_TCP) {
+		__u16 new_csum = 0;
+		bpf_skb_store_bytes(skb, TCP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
+	}
+*/
 
 	// bpf_skb_change_proto() invalidates all pointers - reload them.
 	data = (void*)(long)skb->data;
@@ -182,8 +171,6 @@ int nat64(struct __sk_buff* skb)
 	*new_eth = eth2;
 	// Copy over the new ipv4 header.
 	*(struct iphdr*)(new_eth + 1) = ip;
-
-  // TODO Redirect, possibly back to same interface, so tcpdump sees packet twice.
   bpf_printk("NAT64 IPv4 packet: saddr: %pI4, daddr: %pI4", &ip.saddr, &ip.daddr);
 	return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 }

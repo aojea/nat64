@@ -209,22 +209,20 @@ func sync(v4net, v6net *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-	if len(addresses) != 1 && addresses[0].IPNet.String() != v4net.String() {
-		log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v4net.String())
-		if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v4net}); err != nil {
-			return err
-		}
+
+	log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v4net.String())
+	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v4net}); err != nil {
+		return err
 	}
 
 	addresses, err = netlink.AddrList(link, netlink.FAMILY_V6)
 	if err != nil {
 		return err
 	}
-	if len(addresses) != 1 && addresses[0].IPNet.String() != v6net.String() {
-		log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v6net.String())
-		if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v6net}); err != nil {
-			return err
-		}
+
+	log.Printf("replacing addresses %v on interface %s with %s", addresses, nat64If, v6net.String())
+	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v6net}); err != nil {
+		return err
 	}
 
 	// Create qdisc on nat64 interface

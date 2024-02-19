@@ -16,7 +16,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
-	"k8s.io/klog/v2"
 )
 
 // Stateful implementation of NAT64 based in two stages using a dummy interface.
@@ -332,7 +331,7 @@ func getDefaultGwIf() (string, error) {
 			}
 			intfLink, err := netlink.LinkByIndex(r.LinkIndex)
 			if err != nil {
-				klog.Warningf("Failed to get interface link for route %v : %v", r, err)
+				log.Printf("Failed to get interface link for route %v : %v", r, err)
 				continue
 			}
 			return intfLink.Attrs().Name, nil
@@ -346,7 +345,7 @@ func getDefaultGwIf() (string, error) {
 			}
 			intfLink, err := netlink.LinkByIndex(r.LinkIndex)
 			if err != nil {
-				klog.Warningf("Failed to get interface link for route %v : %v", r, err)
+				log.Printf("Failed to get interface link for route %v : %v", r, err)
 				continue
 			}
 			return intfLink.Attrs().Name, nil

@@ -73,7 +73,10 @@ With all of these ideas I came up with this solution that basically goes as:
 6. When the packet comes back, the MASQUERADE is reverted and the packet is destinted to the `nat64`interface where the statci NAT64 is reverted.
    1. Source IPv6 address is the IPv4 in IPv6 address
    2. Destination IPv6 address is the one we used in the step 4.
-  
+
+## Install
+
+Just do `kubectl apply -f https://raw.githubusercontent.com/aojea/nat64/main/install.yaml`
 
 ## TODO
 

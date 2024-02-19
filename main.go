@@ -157,6 +157,10 @@ func sync(v4net, v6net *net.IPNet) error {
 		}
 	}
 
+	if err := netlink.LinkSetUp(link); err != nil {
+		return err
+	}
+
 	// Configure IP addresses on the NAT64 interface
 	if err := netlink.AddrReplace(link, &netlink.Addr{IPNet: v4net}); err != nil {
 		return err

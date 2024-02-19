@@ -81,7 +81,7 @@ int nat64(struct __sk_buff* skb)
     switch (ip6->nexthdr) {
         case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
         case IPPROTO_UDP:  // address means there is no need to update their checksums.
-        case IPPROTO_ICMP: // TODO
+        case IPPROTO_ICMPV6: // TODO
         case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
         case IPPROTO_ESP:  // since there is never a checksum to update.
             break;
@@ -111,6 +111,8 @@ int nat64(struct __sk_buff* skb)
 		// TODO: figure out why when setting this inside the struct the program fail to load
 	  ip.ttl = ip6->hop_limit;
 		ip.protocol = ip6->nexthdr;
+		if (ip.protocol == IPPROTO_ICMPV6)
+			ip.protocol = IPPROTO_ICMP;
 		ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
 		if (bpf_ntohs(ip.tot_len) > 1280) // https://mailarchive.ietf.org/arch/msg/behave/JfxCt1fGT66pEtfXKuEDJ8rdd7w/
 			ip.frag_off = bpf_htons(IP_DF);

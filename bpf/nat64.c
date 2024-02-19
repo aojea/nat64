@@ -15,10 +15,10 @@
  * limitations under the License.
  */
 
-#include <vmlinux.h>
-#include <bpf/bpf_endian.h>
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
+#include "headers/vmlinux.h"
+#include "headers/bpf_endian.h"
+#include "headers/bpf_helpers.h"
+#include "headers/bpf_tracing.h"
 
 #define TC_ACT_OK  0
 #define TC_ACT_SHOT		2

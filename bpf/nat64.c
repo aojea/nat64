@@ -132,20 +132,11 @@ int nat64(struct __sk_buff* skb)
 	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse u32 into range 1 .. 0x1FFFE
 	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse any potential carry into u16
 	ip.check = (__u16)~sum4;                // sum4 cannot be zero, so this is never 0xFFFF
-	// Calculate the *negative* IPv6 16-bit one's complement checksum of the IPv6 header.
-	__wsum sum6 = 0;
-	// We'll end up with a non-zero sum due to ip6->version == 6 (which has '0' bits)
-	for (int i = 0; i < sizeof(*ip6) / sizeof(__u16); ++i) {
-			sum6 += ~((__u16*)ip6)[i];  // note the bitwise negation
-	}
 
 	// Packet mutations begin - point of no return, but if this first modification fails
 	// the packet is probably still pristine, so let clatd handle it.
 	if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
 		return TC_ACT_OK;
-
-	bpf_csum_update(skb, sum6);
-
 
 	// recalculate protocol checksums
 	// UDP checksum is optional for IPv4

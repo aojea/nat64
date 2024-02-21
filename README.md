@@ -78,13 +78,75 @@ With all of these ideas I came up with this solution that basically goes as:
 
 Just do `kubectl apply -f https://raw.githubusercontent.com/aojea/nat64/main/install.yaml`
 
+
+## Development
+
+Assuming you have checked out the repo and you are already in the repo folder
+
+1. Install kind cluster with IPv6 only
+
+```yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+featureGates:
+networking:
+  ipFamily: ipv6
+nodes:
+- role: control-plane
+- role: worker
+```
+
+```sh
+kind create cluster --name ipv6 --config kind-ipv6.yaml
+```
+
+2. Build project (it already compiles the eBPF code too)
+
+```sh
+docker build . -t aojea/nat64:v0.1.0 
+```
+
+3. Preload the image in the kind cluster we just created
+
+```sh
+kind load docker-image aojea/nat64:v0.1.0 --name ipv6
+```
+
+4. Install the nat64 daemonset
+
+```sh
+kubectl delete -f install.yaml  && kubectl apply -f install.yaml 
+```
+
+in case you already have it installed you can rollout restart the daemonset or just delete and create again
+
+```sh
+kubectl delete -f install.yaml  && kubectl apply -f install.yaml 
+```
+
+5. Once it is installed you can test it by creating a pod and checking the connectivity to IPv4 sites using the NAT64 prefix:
+
+```sh
+$ kubectl run test --image k8s.gcr.io/e2e-test-images/agnhost:2.39 --command -- /agnhost netexec --http-port=8080
+$ kubectl exec -it test bash
+...
+# UDP test
+dig @64:ff9b::8.8.8.8 www.google.es
+# TCP test
+curl [64:ff9b::140.82.121.4]:80
+```
+
 ## TODO
 
 This is far to be complete, features and suggestions are welcome:
 
 - [ ] metrics: number of NAT64 translations: connection, packets, protocol, ...
 - [ ] Right now the algorithm to map 6 to 4 is very simple, use the latest digit from the Pod IPv6 address, this limits us to 254 connection, is that enough?
-- [ ] 
+- [ ] TCP and UDP checksum
+- [ ] ICMP
+- [ ] Testing, testing, ....
+
+
  
 ## References
 

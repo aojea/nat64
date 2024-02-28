@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -128,7 +129,12 @@ func main() {
 	log.Printf("create NAT64 interface %s with networks %s and %s", nat64If, v4net.String(), v6net.String())
 	err = sync(v4net, v6net)
 	if err != nil {
-		log.Fatalf("Could not sync nat64: %v", err)
+		var verr *ebpf.VerifierError
+		if errors.As(err, &verr) {
+			log.Fatalf("BPF verifier error: %+v\n", verr)
+		} else {
+			log.Fatalf("Could not sync nat64: %v", err)
+		}
 	}
 
 	ticker := time.NewTicker(reconcilePeriod)

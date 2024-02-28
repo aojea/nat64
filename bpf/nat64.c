@@ -84,8 +84,8 @@ int nat64(struct __sk_buff* skb)
 	bpf_printk("NAT64 IPv6 packet: saddr: %pI6, daddr: %pI6", &ip6->saddr, &ip6->daddr);
 
 	switch (ip6->nexthdr) {
-			case IPPROTO_TCP:  // For TCP & UDP the checksum neutrality of the chosen IPv6
-			case IPPROTO_UDP:  // address means there is no need to update their checksums.
+			case IPPROTO_TCP:
+			case IPPROTO_UDP:
 			case IPPROTO_ICMPV6: // TODO
 			case IPPROTO_GRE:  // We do not need to bother looking at GRE/ESP headers,
 			case IPPROTO_ESP:  // since there is never a checksum to update.
@@ -105,12 +105,12 @@ int nat64(struct __sk_buff* skb)
 	__u32 src_addr = 0xA9FE4000 + (bpf_ntohl(ip6->saddr.in6_u.u6_addr32[3]) & 0x000000FF);
 
 	struct iphdr ip = {
-					.version = 4,                                                      // u4
-					.ihl = sizeof(struct iphdr) / sizeof(__u32),                       // u4
-					.tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),             // u8
-					.id = 0,                                                           // u16
-					.check = 0,                                                        // u16
-					.frag_off = 0,                                                     // u16
+		.version = 4,                                           // u4
+		.ihl = sizeof(struct iphdr) / sizeof(__u32),            // u4
+		.tos = (ip6->priority << 4) + (ip6->flow_lbl[0] >> 4),  // u8
+		.id = 0,                                                // u16
+		.check = 0,                                             // u16
+		.frag_off = 0,                                          // u16
 	};
 
 	ip.ttl = ip6->hop_limit;
@@ -119,14 +119,14 @@ int nat64(struct __sk_buff* skb)
 		ip.protocol = IPPROTO_ICMP;
 	ip.tot_len = bpf_htons(bpf_ntohs(ip6->payload_len) + sizeof(struct iphdr));
 	if (bpf_ntohs(ip.tot_len) > 1280) // https://mailarchive.ietf.org/arch/msg/behave/JfxCt1fGT66pEtfXKuEDJ8rdd7w/
-		ip.frag_off = bpf_htons(IP_DF);
+	ip.frag_off = bpf_htons(IP_DF);
 	ip.saddr = bpf_htonl(src_addr);
 	ip.daddr = ip6->daddr.in6_u.u6_addr32[3];
 
 	// Calculate the IPv4 one's complement checksum of the IPv4 header.
 	__wsum sum4 = 0;
 	for (int i = 0; i < sizeof(ip) / sizeof(__u16); ++i) {
-			sum4 += ((__u16*)&ip)[i];
+		sum4 += ((__u16*)&ip)[i];
 	}
 	// Note that sum4 is guaranteed to be non-zero by virtue of ip.version == 4
 	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse u32 into range 1 .. 0x1FFFE
@@ -178,7 +178,7 @@ int nat64(struct __sk_buff* skb)
 	*new_eth = eth2;
 	// Copy over the new ipv4 header.
 	*(struct iphdr*)(new_eth + 1) = ip;
-  bpf_printk("NAT64 IPv4 packet: saddr: %pI4, daddr: %pI4", &ip.saddr, &ip.daddr);
+	bpf_printk("NAT64 IPv4 packet: saddr: %pI4, daddr: %pI4", &ip.saddr, &ip.daddr);
 	return bpf_redirect(skb->ifindex, BPF_F_INGRESS);
 }
 
@@ -210,7 +210,7 @@ static __always_inline int nat46(struct __sk_buff *skb)
 	if (ip4->version != 4)
 		return TC_ACT_OK;
 
-    bpf_printk("NAT46 IPv4 packet: saddr: %pI4, daddr: %pI4", &ip4->saddr, &ip4->daddr);
+	bpf_printk("NAT46 IPv4 packet: saddr: %pI4, daddr: %pI4", &ip4->saddr, &ip4->daddr);
 
 	// We cannot handle IP options, just standard 20 byte == 5 dword minimal IPv4 header
 	if (ip4->ihl != 5)
@@ -269,18 +269,18 @@ static __always_inline int nat46(struct __sk_buff *skb)
 	eth2 = *eth;                     // Copy over the ethernet header (src/dst mac)
 	eth2.h_proto = bpf_htons(ETH_P_IPV6);  // But replace the ethertype
 
-  // build dest ip, last byte of the ipv6 addres plus the pod prefix
-  // pod_prefix::xxx
+	// build dest ip, last byte of the ipv6 address plus the pod prefix
+	// pod_prefix::xxx
 	 __u32 dst_addr =  bpf_ntohl(ip4->daddr) & 0x000000FF;
 
 	struct ipv6hdr ip6 = {
-		.version = 6,                                    // __u8:4
-		.priority = ip4->tos >> 4,                       // __u8:4
-		.flow_lbl = {(ip4->tos & 0xF) << 4, 0, 0},       // __u8[3]
+		.version = 6,                                            // __u8:4
+		.priority = ip4->tos >> 4,                               // __u8:4
+		.flow_lbl = {(ip4->tos & 0xF) << 4, 0, 0},               // __u8[3]
 		.payload_len = bpf_htons(bpf_ntohs(ip4->tot_len) - 20),  // __be16
-		.hop_limit = ip4->ttl,                           // __u8
+		.hop_limit = ip4->ttl,                                   // __u8
 	};
-	ip6.nexthdr = ip4->protocol;                        // __u8
+	ip6.nexthdr = ip4->protocol;                                     // __u8
 	if (ip4->protocol== IPPROTO_ICMP)
 		ip6.nexthdr = IPPROTO_ICMPV6;
 	ip6.saddr.in6_u.u6_addr32[0] = bpf_htonl(0x0064ff9b);

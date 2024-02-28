@@ -54,7 +54,7 @@ int nat64(struct __sk_buff* skb)
 	void *data = (void *)(long)skb->data;
 	const void *data_end = (void *)(long)skb->data_end;
 	const struct ethhdr *const eth = data;  // used iff is_ethernet
-	const struct ipv6hdr *const ip6 =  (void *)(eth + 1);
+	const struct ipv6hdr *const ip6 = (void *)(eth + 1);
 
 	bpf_printk("NAT64: starting");
 	// Require ethernet dst mac address to be our unicast address.
@@ -133,6 +133,17 @@ int nat64(struct __sk_buff* skb)
 	sum4 = (sum4 & 0xFFFF) + (sum4 >> 16);  // collapse any potential carry into u16
 	ip.check = (__u16)~sum4;                // sum4 cannot be zero, so this is never 0xFFFF
 
+	__u64 diff = 0;
+
+	// calculate checksum difference before any helpers that modify
+	// packet's data are called, because verifier will invalidate
+	// all packet pointers
+	if (ip.protocol == IPPROTO_TCP) {
+		// cover both src and dst address change, buffer for dst addr field is
+		// right after src addr both for IPv4 and IPv6 header
+		diff = bpf_csum_diff((void *)&(ip6->saddr), 2*sizeof(struct in6_addr), (void *)&(ip.saddr), 2*sizeof(__u32), 0);
+	}
+
 	// Packet mutations begin - point of no return, but if this first modification fails
 	// the packet is probably still pristine, so let clatd handle it.
 	if (bpf_skb_change_proto(skb, bpf_htons(ETH_P_IP), 0))
@@ -144,10 +155,14 @@ int nat64(struct __sk_buff* skb)
 		__u16 new_csum = 0;
 		bpf_skb_store_bytes(skb, UDP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
 	}
-	// TODO: recalculate TCP checksum since we can not depend on checksum neutrality
+	// recalculate TCP checksum since we can not depend on checksum neutrality
 	if (ip.protocol == IPPROTO_TCP) {
-		__u16 new_csum = 0;
-		bpf_skb_store_bytes(skb, TCP_CSUM_OFF, &new_csum, sizeof(new_csum), 0);
+		if (diff > 0) {
+			int ret = bpf_l4_csum_replace(skb, TCP_CSUM_OFF, 0, diff, BPF_F_PSEUDO_HDR);
+			if (ret < 0) {
+				return TC_ACT_SHOT;
+			}
+		}
 	}
 
 	// bpf_skb_change_proto() invalidates all pointers - reload them.

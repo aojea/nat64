@@ -91,13 +91,13 @@ func main() {
 	}
 	// TODO: do not consider the default route
 	if len(routes) > 1 {
-		log.Printf("Overalapping routes %v with the range %s", routes, natV4Range)
+		log.Printf("Overlapping routes %v with the range %s", routes, natV4Range)
 	}
 
 	// Obtain the interface with the default route for IPv4 so we can masquerade the traffic
 	gwIface, err = getDefaultGwIf()
 	if err != nil {
-		log.Fatalf("can not obtain default IPv4 gatewat interface: %v", err)
+		log.Fatalf("can not obtain default IPv4 gateway interface: %v", err)
 	}
 	log.Printf("detected %s as default gateway interface", gwIface)
 

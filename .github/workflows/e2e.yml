@@ -18,8 +18,6 @@ env:
   IMAGE_NAME: aojea/nat64
   KIND_CLUSTER_NAME: kind
 
-permissions: write-all
-
 jobs:
   build:
     name: build
@@ -175,7 +173,8 @@ jobs:
 
   publish:
     name: publish
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    permissions: write-all
     timeout-minutes: 10
     needs:
       - e2e

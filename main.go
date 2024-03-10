@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -90,13 +91,13 @@ func main() {
 	}
 	// TODO: do not consider the default route
 	if len(routes) > 1 {
-		log.Printf("Overalapping routes %v with the range %s", routes, natV4Range)
+		log.Printf("Overlapping routes %v with the range %s", routes, natV4Range)
 	}
 
 	// Obtain the interface with the default route for IPv4 so we can masquerade the traffic
 	gwIface, err = getDefaultGwIf()
 	if err != nil {
-		log.Fatalf("can not obtain default IPv4 gatewat interface: %v", err)
+		log.Fatalf("can not obtain default IPv4 gateway interface: %v", err)
 	}
 	log.Printf("detected %s as default gateway interface", gwIface)
 
@@ -128,7 +129,12 @@ func main() {
 	log.Printf("create NAT64 interface %s with networks %s and %s", nat64If, v4net.String(), v6net.String())
 	err = sync(v4net, v6net)
 	if err != nil {
-		log.Fatalf("Could not sync nat64: %v", err)
+		var verr *ebpf.VerifierError
+		if errors.As(err, &verr) {
+			log.Fatalf("BPF verifier error: %+v\n", verr)
+		} else {
+			log.Fatalf("Could not sync nat64: %v", err)
+		}
 	}
 
 	ticker := time.NewTicker(reconcilePeriod)

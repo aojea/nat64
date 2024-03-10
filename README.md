@@ -43,15 +43,16 @@ There are [many implementations of Open Source NAT64](https://ripe85.ripe.net/pr
 Some time ago [I hacked a solution proxying IPv6 on IPv4](https://github.com/aojea/tproxy64/) but it was just that ... a hack. However, I've found out recently that [android
 has a NAT64 implementation in eBPF](https://android.googlesource.com/platform//system/netd/+/c753c3d3735396a9686b3447bae6bdea85ebb1e2/bpf_progs/clatd.c) and started to think more about this ...
 
-The main problem is that we need to implement [Stateful NAT64](https://datatracker.ietf.org/doc/html/rfc6146), and writing the NAT/conntrack logic is complex and hard to support, not mentioning that both NAT/conntrack systems are not synchronized so there can be [collisions and packet drops](https://github.com/cilium/cilium/issues/23604#issuecomment-1832040160) :/ 
+The main problem is that we need to implement [Stateful NAT64](https://datatracker.ietf.org/doc/html/rfc6146), and writing the NAT/conntrack logic is complex and hard to support, not mentioning that both NAT/conntrack systems are not synchronized so there can be [collisions and packet drops](https://github.com/cilium/cilium/issues/23604#issuecomment-1832040160) :/
 
 I also wanted this solution simple to troubleshoot and hermetic, so I remember my old days configuring routers, and I liked the existing solutions using a NAT64 interface.
 
 With all of these ideas I came up with this solution that basically goes as:
 
 1. The program runs as Daemonset all nodes
-2. It configures a dummy interface named `nat64` by default
-  
+
+1. It configures a dummy interface named `nat64` by default
+
 ```sh
 5: nat64: <BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
     link/ether ca:a6:ab:76:fb:7c brd ff:ff:ff:ff:ff:ff
@@ -63,16 +64,25 @@ With all of these ideas I came up with this solution that basically goes as:
        valid_lft forever preferred_lft forever
 ```
 
-3. This interface has assigned two subnets
-   1. The IPv6 one is the IPv4 in IPv6 prefx, the defailt is `64:ff9b::/96` per rfc6052.
-   2. The IPv4 one is `169.254.64.0/24`, link-local also alliviate the risk of leaking traffic or overlapping.
-4. The packets that goes directed to the NAT64 IPv6 prefx are NAT64 stateless
+1. This interface has assigned two subnets
+
+   1. The IPv6 one is the IPv4 in IPv6 prefx, the default is `64:ff9b::/96` per rfc6052
+
+   1. The IPv4 one is `169.254.64.0/24`, link-local also alleviates the risk of leaking traffic or overlapping.
+
+1. The packets with IPv6 prefix that are directed are NAT64 stateless
+
    1. Pod IPv6 saddr is replaced by one address in the IPv4 configured range
-   2. Destination IPv6 has the destination IP4 embedded
-5. After the static NAT is performed, the packet goes through the kernel again and is MASQUERADE to the Internet with the IPv4 of the host, replacing the IPv4 from the `nat64` interface range.
-6. When the packet comes back, the MASQUERADE is reverted and the packet is destinted to the `nat64`interface where the statci NAT64 is reverted.
+
+   1. Destination IPv6 has the destination IP4 embedded
+
+1. After the static NAT is performed, the packet goes through the kernel again and is MASQUERADE to the Internet with the IPv4 of the host, replacing the IPv4 from the `nat64` interface range.
+
+1. When the packet comes back, the MASQUERADE is reverted and the packet is destinted to the `nat64`interface where the static NAT64 is reverted.
+
    1. Source IPv6 address is the IPv4 in IPv6 address
-   2. Destination IPv6 address is the one we used in the step 4.
+
+   1. Destination IPv6 address is the one we used in the step 4.
 
 ## Install
 
@@ -100,31 +110,31 @@ nodes:
 kind create cluster --name ipv6 --config kind-ipv6.yaml
 ```
 
-2. Build project (it already compiles the eBPF code too)
+1. Build project (it already compiles the eBPF code too)
 
 ```sh
-docker build . -t aojea/nat64:v0.1.0 
+docker build . -t aojea/nat64:v0.1.0
 ```
 
-3. Preload the image in the kind cluster we just created
+1. Preload the image in the kind cluster we just created
 
 ```sh
 kind load docker-image aojea/nat64:v0.1.0 --name ipv6
 ```
 
-4. Install the nat64 daemonset
+1. Install the nat64 daemonset
 
 ```sh
-kubectl delete -f install.yaml  && kubectl apply -f install.yaml 
+kubectl apply -f install.yaml
 ```
 
 in case you already have it installed you can rollout restart the daemonset or just delete and create again
 
 ```sh
-kubectl delete -f install.yaml  && kubectl apply -f install.yaml 
+kubectl delete -f install.yaml  && kubectl apply -f install.yaml
 ```
 
-5. Once it is installed you can test it by creating a pod and checking the connectivity to IPv4 sites using the NAT64 prefix:
+1. Once it is installed you can test it by creating a pod and checking the connectivity to IPv4 sites using the NAT64 prefix:
 
 ```sh
 $ kubectl run test --image k8s.gcr.io/e2e-test-images/agnhost:2.39 --command -- /agnhost netexec --http-port=8080
@@ -146,10 +156,11 @@ This is far to be complete, features and suggestions are welcome:
 - [ ] ICMP
 - [ ] Testing, testing, ....
 
+## Contributors
 
- 
+@siwiutki
+
 ## References
-
 
 - https://datatracker.ietf.org/doc/html/rfc6052
 - https://datatracker.ietf.org/doc/html/rfc6146

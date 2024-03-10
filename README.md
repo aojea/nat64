@@ -152,7 +152,7 @@ This is far to be complete, features and suggestions are welcome:
 
 - [ ] metrics: number of NAT64 translations: connection, packets, protocol, ...
 - [ ] Right now the algorithm to map 6 to 4 is very simple, use the latest digit from the Pod IPv6 address, this limits us to 254 connection, is that enough?
-- [ ] TCP and UDP checksum
+- [x] TCP and UDP checksum (fixed by @siwiutki)
 - [ ] ICMP
 - [ ] Testing, testing, ....
 

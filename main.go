@@ -117,7 +117,7 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		log.Printf("starting metrics server listening in %s", metricsBindAddress)
-		http.ListenAndServe(metricsBindAddress, nil)
+		http.ListenAndServe(metricsBindAddress, nil) // nolint:errcheck
 	}()
 
 	// Remove resource limits for kernels <5.11.
